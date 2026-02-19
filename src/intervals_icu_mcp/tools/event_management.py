@@ -53,6 +53,46 @@ _CATEGORY_ALIASES = {
     "FTP": "SET_EFTP",
 }
 
+# Valid sport/activity types accepted by the API
+_VALID_TYPES = [
+    "Ride", "Run", "Swim", "WeightTraining", "Hike", "Walk",
+    "AlpineSki", "BackcountrySki", "Canoeing", "Crossfit",
+    "EBikeRide", "Elliptical", "Golf", "GravelRide",
+    "Handcycle", "IceSkate", "InlineSkate", "Kayaking",
+    "Kitesurf", "MountainBikeRide", "NordicSki", "RockClimbing",
+    "RollerSki", "Rowing", "Snowboard", "Snowshoe",
+    "StairStepper", "StandUpPaddling", "Surfing",
+    "TrailRun", "VirtualRide", "VirtualRun", "Wheelchair",
+    "Windsurf", "Workout", "Yoga", "Other",
+]
+
+# Known API field names for events (to detect typos/wrong names)
+_VALID_EVENT_FIELDS = {
+    "start_date_local", "end_date_local", "name", "category", "type",
+    "description", "moving_time", "distance", "icu_training_load",
+    "indoor", "color", "external_id", "tags", "workout_doc",
+    "athlete_cannot_edit", "hide_from_athlete", "target",
+    "carbs_per_hour", "sub_type", "not_on_fitness_chart",
+}
+
+# Common field name mistakes → correct field name
+_FIELD_ALIASES = {
+    "start_date": "start_date_local",
+    "date": "start_date_local",
+    "duration": "moving_time",
+    "duration_seconds": "moving_time",
+    "time": "moving_time",
+    "load": "icu_training_load",
+    "training_load": "icu_training_load",
+    "tss": "icu_training_load",
+    "sport_type": "type",
+    "activity_type": "type",
+    "event_type": "type",
+    "workout_type": "type",
+    "distance_meters": "distance",
+    "title": "name",
+}
+
 
 def _normalize_category(category: str) -> str:
     """Normalize an event category, auto-correcting common mistakes.
@@ -70,7 +110,203 @@ def _normalize_category(category: str) -> str:
     # Unknown category
     raise ValueError(
         f"Invalid category '{category}'. "
-        f"Must be one of: {', '.join(VALID_CATEGORIES)}"
+        f"Must be one of: {', '.join(VALID_CATEGORIES)}. "
+        f"Common aliases: RACE→RACE_A, GOAL→TARGET, REST→HOLIDAY, "
+        f"INJURY→INJURED, FTP→SET_EFTP."
+    )
+
+
+def _normalize_event_type(event_type: str) -> str:
+    """Normalize an activity/sport type, auto-correcting case mismatches.
+
+    Returns the correctly-cased type if found. Raises ValueError if unknown.
+    """
+    # Build a case-insensitive lookup
+    type_lookup = {t.lower(): t for t in _VALID_TYPES}
+    lower = event_type.lower()
+    if lower in type_lookup:
+        return type_lookup[lower]
+    # Try partial match
+    matches = [t for t in _VALID_TYPES if lower in t.lower() or t.lower() in lower]
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        raise ValueError(
+            f"Ambiguous activity type '{event_type}'. "
+            f"Did you mean one of: {', '.join(matches)}?"
+        )
+    raise ValueError(
+        f"Unknown activity type '{event_type}'. "
+        f"Valid types: Ride, Run, Swim, VirtualRide, GravelRide, "
+        f"TrailRun, WeightTraining, Hike, Walk, Yoga, Other. "
+        f"Use exact casing (e.g., 'Ride' not 'ride')."
+    )
+
+
+def _diagnose_event_error(error: ICUAPIError) -> str:
+    """Analyze a 400 API error and return actionable suggestions for the agent.
+
+    Inspects the request payload to identify common mistakes and returns
+    specific guidance on how to fix them.
+    """
+    suggestions: list[str] = []
+    payload = error.request_payload or {}
+
+    if not isinstance(payload, dict):
+        return ResponseBuilder.build_error_response(
+            "The event payload must be a JSON object (dict), not a "
+            f"{type(payload).__name__}. Build a dict with keys like "
+            "'start_date_local', 'name', 'category', 'type', etc.",
+            error_type="validation_error",
+            suggestions=[
+                "Payload must be a JSON object with string keys.",
+                "Required keys: start_date_local, name, category.",
+                "Example: {\"start_date_local\": \"2026-03-01\", "
+                "\"name\": \"Easy Ride\", \"category\": \"WORKOUT\", "
+                "\"type\": \"Ride\"}",
+            ],
+        )
+
+    # Check for wrong field names
+    for key in list(payload.keys()):
+        if key in _FIELD_ALIASES:
+            correct = _FIELD_ALIASES[key]
+            suggestions.append(
+                f"Field '{key}' is not a valid API field. "
+                f"Use '{correct}' instead."
+            )
+        elif key not in _VALID_EVENT_FIELDS:
+            suggestions.append(
+                f"Unknown field '{key}'. Valid fields: "
+                f"{', '.join(sorted(_VALID_EVENT_FIELDS))}."
+            )
+
+    # Check category
+    cat = payload.get("category", "")
+    if cat and isinstance(cat, str):
+        upper_cat = cat.upper()
+        if upper_cat not in VALID_CATEGORIES:
+            if upper_cat in _CATEGORY_ALIASES:
+                suggestions.append(
+                    f"Category '{cat}' is invalid. "
+                    f"Use '{_CATEGORY_ALIASES[upper_cat]}' instead."
+                )
+            else:
+                suggestions.append(
+                    f"Category '{cat}' is not valid. "
+                    f"Must be one of: {', '.join(VALID_CATEGORIES)}. "
+                    f"Common mappings: RACE→RACE_A, GOAL→TARGET, "
+                    f"REST→HOLIDAY, INJURY→INJURED, FTP→SET_EFTP."
+                )
+
+    # Check date format
+    date_val = payload.get("start_date_local", "")
+    if date_val and isinstance(date_val, str):
+        valid_date = False
+        for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d"]:
+            try:
+                datetime.strptime(date_val, fmt)
+                valid_date = True
+                break
+            except ValueError:
+                continue
+        if not valid_date:
+            suggestions.append(
+                f"Date '{date_val}' has invalid format. "
+                f"Use YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS. "
+                f"Example: '2026-03-01' or '2026-03-01T14:00:00'."
+            )
+    elif "start_date" in payload and "start_date_local" not in payload:
+        suggestions.append(
+            "Missing 'start_date_local'. The API requires 'start_date_local', "
+            "not 'start_date'. Rename the field."
+        )
+    elif "start_date_local" not in payload:
+        suggestions.append(
+            "Missing required field 'start_date_local'. "
+            "Every event needs a date in YYYY-MM-DD format."
+        )
+
+    # Check type (sport type)
+    type_val = payload.get("type", "")
+    if type_val and isinstance(type_val, str):
+        if type_val not in _VALID_TYPES:
+            # Find close matches
+            lower_type = type_val.lower()
+            close = [t for t in _VALID_TYPES if lower_type in t.lower() or t.lower() in lower_type]
+            if close:
+                suggestions.append(
+                    f"Activity type '{type_val}' may not be valid. "
+                    f"Did you mean: {', '.join(close)}?"
+                )
+            else:
+                suggestions.append(
+                    f"Activity type '{type_val}' is not recognized. "
+                    f"Common types: Ride, Run, Swim, VirtualRide, "
+                    f"GravelRide, TrailRun, WeightTraining, Hike."
+                )
+
+    # Check moving_time is a number
+    mt = payload.get("moving_time")
+    if mt is not None and not isinstance(mt, (int, float)):
+        suggestions.append(
+            f"'moving_time' must be an integer (seconds), got {type(mt).__name__}. "
+            f"Examples: 3600=1h, 5400=1.5h, 7200=2h."
+        )
+
+    # Check distance is a number
+    dist = payload.get("distance")
+    if dist is not None and not isinstance(dist, (int, float)):
+        suggestions.append(
+            f"'distance' must be a number (meters), got {type(dist).__name__}. "
+            f"Examples: 40000=40km, 100000=100km."
+        )
+
+    # Check workout_doc structure
+    wd = payload.get("workout_doc")
+    if wd is not None:
+        if not isinstance(wd, dict):
+            suggestions.append(
+                "'workout_doc' must be a JSON object. "
+                "Example: {\"description\": \"Warmup\\n- 10m ramp 45-55%\", \"steps\": []}"
+            )
+        elif "description" not in wd and "steps" not in wd:
+            suggestions.append(
+                "'workout_doc' should contain 'description' (text format) and/or 'steps' (array). "
+                "For text-based workouts, use: "
+                "{\"description\": \"workout text here\", \"steps\": []}"
+            )
+
+    # Check for missing required fields
+    if "name" not in payload:
+        suggestions.append("Missing required field 'name'. Every event needs a name.")
+    if "category" not in payload:
+        suggestions.append(
+            "Missing required field 'category'. "
+            "Use WORKOUT for training, NOTE for notes, RACE_A for races, etc."
+        )
+
+    # If no specific issues found, provide general guidance
+    if not suggestions:
+        suggestions = [
+            "The Intervals.icu API rejected this request. Check that all field "
+            "names and values match the expected format.",
+            f"Required fields: start_date_local (YYYY-MM-DD), name (string), "
+            f"category ({', '.join(VALID_CATEGORIES[:5])}...).",
+            "Optional fields: type (Ride/Run/Swim), moving_time (seconds), "
+            "distance (meters), description (string), workout_doc (object).",
+            f"API response: {error.response_text or error.message}",
+        ]
+
+    error_msg = (
+        f"Intervals.icu API rejected the event creation request. "
+        f"Found {len(suggestions)} issue(s) to fix."
+    )
+
+    return ResponseBuilder.build_error_response(
+        error_msg,
+        error_type="api_validation_error",
+        suggestions=suggestions,
     )
 
 
@@ -124,6 +360,17 @@ async def create_event(
             error_type="validation_error",
         )
 
+    # Validate and normalize event type (auto-corrects casing)
+    normalized_type = None
+    if event_type:
+        try:
+            normalized_type = _normalize_event_type(event_type)
+        except ValueError as e:
+            return ResponseBuilder.build_error_response(
+                str(e),
+                error_type="validation_error",
+            )
+
     # Validate and parse date format
     try:
         start_date_local = parse_start_date_local(start_date)
@@ -143,8 +390,8 @@ async def create_event(
 
         if description:
             event_data["description"] = description
-        if event_type:
-            event_data["type"] = event_type
+        if normalized_type:
+            event_data["type"] = normalized_type
         if duration_seconds:
             event_data["moving_time"] = duration_seconds
         if distance_meters:
@@ -180,6 +427,8 @@ async def create_event(
             )
 
     except ICUAPIError as e:
+        if e.status_code == 400:
+            return _diagnose_event_error(e)
         return ResponseBuilder.build_error_response(e.message, error_type="api_error")
     except Exception as e:
         return ResponseBuilder.build_error_response(
@@ -286,6 +535,8 @@ async def update_event(
             )
 
     except ICUAPIError as e:
+        if e.status_code == 400:
+            return _diagnose_event_error(e)
         return ResponseBuilder.build_error_response(e.message, error_type="api_error")
     except Exception as e:
         return ResponseBuilder.build_error_response(
@@ -327,6 +578,8 @@ async def delete_event(
                 )
 
     except ICUAPIError as e:
+        if e.status_code == 400:
+            return _diagnose_event_error(e)
         return ResponseBuilder.build_error_response(e.message, error_type="api_error")
     except Exception as e:
         return ResponseBuilder.build_error_response(
@@ -398,12 +651,28 @@ async def bulk_create_events(
                     error_type="validation_error",
                 )
 
+            # Auto-correct common field name mistakes
+            for wrong_name, correct_name in _FIELD_ALIASES.items():
+                if wrong_name in event_data and correct_name not in event_data:
+                    event_data[correct_name] = event_data.pop(wrong_name)
+
+            # Validate and normalize event type
+            if "type" in event_data:
+                try:
+                    event_data["type"] = _normalize_event_type(event_data["type"])
+                except ValueError as e:
+                    return ResponseBuilder.build_error_response(
+                        f"Event {i}: {e}",
+                        error_type="validation_error",
+                    )
+
             # Validate date format
             try:
                 datetime.strptime(event_data["start_date_local"], "%Y-%m-%d")
             except ValueError:
                 return ResponseBuilder.build_error_response(
-                    f"Event {i}: Invalid date format. Please use YYYY-MM-DD format.",
+                    f"Event {i}: Invalid date format '{event_data['start_date_local']}'. "
+                    f"Use YYYY-MM-DD format (e.g., '2026-03-01').",
                     error_type="validation_error",
                 )
 
@@ -442,6 +711,8 @@ async def bulk_create_events(
             )
 
     except ICUAPIError as e:
+        if e.status_code == 400:
+            return _diagnose_event_error(e)
         return ResponseBuilder.build_error_response(e.message, error_type="api_error")
     except Exception as e:
         return ResponseBuilder.build_error_response(
@@ -501,6 +772,8 @@ async def bulk_delete_events(
             )
 
     except ICUAPIError as e:
+        if e.status_code == 400:
+            return _diagnose_event_error(e)
         return ResponseBuilder.build_error_response(e.message, error_type="api_error")
     except Exception as e:
         return ResponseBuilder.build_error_response(
@@ -537,6 +810,8 @@ async def mark_event_done(
             )
 
     except ICUAPIError as e:
+        if e.status_code == 400:
+            return _diagnose_event_error(e)
         return ResponseBuilder.build_error_response(e.message, error_type="api_error")
     except Exception as e:
         return ResponseBuilder.build_error_response(
@@ -606,6 +881,8 @@ async def duplicate_event(
             )
 
     except ICUAPIError as e:
+        if e.status_code == 400:
+            return _diagnose_event_error(e)
         return ResponseBuilder.build_error_response(e.message, error_type="api_error")
     except Exception as e:
         return ResponseBuilder.build_error_response(
