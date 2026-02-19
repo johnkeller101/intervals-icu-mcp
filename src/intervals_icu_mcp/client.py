@@ -12,7 +12,7 @@ from .models import (
     ActivityStreams,
     ActivitySummary,
     Athlete,
-    BestEffort,
+    BestEfforts,
     Event,
     Folder,
     Gear,
@@ -730,18 +730,54 @@ class ICUClient:
     async def get_best_efforts(
         self,
         activity_id: str,
-    ) -> list[BestEffort]:
-        """Get best efforts for an activity.
+        stream: str = "watts",
+        duration: int | None = None,
+        distance: float | None = None,
+        count: int = 8,
+        min_value: float | None = None,
+        exclude_intervals: bool = False,
+        start_index: int | None = None,
+        end_index: int | None = None,
+    ) -> BestEfforts:
+        """Find best efforts in an activity.
+
+        One of duration or distance is required.
 
         Args:
             activity_id: Activity ID
+            stream: Stream to search (e.g., "watts", "heartrate", "speed", "cadence")
+            duration: Duration of each effort in seconds
+            distance: Distance of each effort in meters
+            count: Number of efforts to return (default 8)
+            min_value: Minimum average value for each interval
+            exclude_intervals: If true, portions in work intervals are excluded
+            start_index: First point in stream to consider
+            end_index: Last point in stream to consider (exclusive)
 
         Returns:
-            List of BestEffort objects
+            BestEfforts container with list of effort objects
         """
-        response = await self._request("GET", f"/activity/{activity_id}/best-efforts")
-        adapter = TypeAdapter(list[BestEffort])
-        return adapter.validate_python(response.json())
+        params: dict[str, str | int | float | bool] = {
+            "stream": stream,
+            "count": count,
+        }
+        if duration is not None:
+            params["duration"] = duration
+        if distance is not None:
+            params["distance"] = distance
+        if min_value is not None:
+            params["minValue"] = min_value
+        if exclude_intervals:
+            params["excludeIntervals"] = True
+        if start_index is not None:
+            params["startIndex"] = start_index
+        if end_index is not None:
+            params["endIndex"] = end_index
+
+        response = await self._request(
+            "GET", f"/activity/{activity_id}/best-efforts", params=params
+        )
+        return BestEfforts(**response.json())
 
     async def search_intervals(
         self,

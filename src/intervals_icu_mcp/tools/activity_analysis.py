@@ -217,16 +217,29 @@ async def get_activity_intervals(
 
 async def get_best_efforts(
     activity_id: Annotated[str, "Activity ID to analyze"],
+    stream: Annotated[str, "Data stream to search (e.g., 'watts', 'heartrate', 'speed', 'cadence')"] = "watts",
+    duration: Annotated[int | None, "Duration of each effort in seconds (e.g., 5, 60, 300, 1200). One of duration or distance is required."] = None,
+    distance: Annotated[float | None, "Distance of each effort in meters (e.g., 1000, 5000). One of duration or distance is required."] = None,
+    count: Annotated[int, "Number of best efforts to return"] = 8,
+    exclude_intervals: Annotated[bool, "If true, exclude portions already in work intervals"] = False,
     ctx: Context | None = None,
 ) -> str:
-    """Get best efforts/peak performances from an activity.
+    """Find best efforts/peak performances in an activity for a given stream and duration or distance.
 
-    Analyzes the activity to find the best performances across various durations
-    (e.g., best 5-second power, best 1-minute power, best 20-minute power).
-    Similar to Strava segments but for all durations.
+    Searches through the activity's data stream to find the top N efforts of a
+    specified duration or distance. For example, find the best 5-second power,
+    best 20-minute power, or best 1km speed.
+
+    One of duration or distance is required. Common power duration queries:
+    - 5s (sprint), 30s (anaerobic), 60s (1min), 300s (5min), 1200s (20min), 3600s (1hr)
 
     Args:
         activity_id: The unique ID of the activity
+        stream: Data stream to search (watts, heartrate, speed, cadence)
+        duration: Duration of each effort in seconds
+        distance: Distance of each effort in meters
+        count: Number of efforts to return (default 8)
+        exclude_intervals: Exclude work interval portions from search
 
     Returns:
         JSON string with best efforts data
@@ -234,45 +247,44 @@ async def get_best_efforts(
     assert ctx is not None
     config: ICUConfig = ctx.get_state("config")
 
+    if duration is None and distance is None:
+        return ResponseBuilder.build_error_response(
+            "One of 'duration' or 'distance' is required.",
+            error_type="validation_error",
+            suggestions=[
+                "Provide 'duration' in seconds (e.g., 5, 60, 300, 1200 for 5s, 1min, 5min, 20min)",
+                "Or provide 'distance' in meters (e.g., 1000 for 1km)",
+                "Common power durations: 5 (sprint), 30 (anaerobic), 60, 300 (5min), 1200 (20min)",
+            ],
+        )
+
     try:
         async with ICUClient(config) as client:
-            best_efforts = await client.get_best_efforts(activity_id)
+            result = await client.get_best_efforts(
+                activity_id,
+                stream=stream,
+                duration=duration,
+                distance=distance,
+                count=count,
+                exclude_intervals=exclude_intervals,
+            )
 
-            if not best_efforts:
+            if not result.efforts:
                 return ResponseBuilder.build_response(
                     data={"best_efforts": [], "count": 0, "activity_id": activity_id},
                     metadata={"message": "No best efforts found for this activity"},
                 )
 
             efforts_data: list[dict[str, Any]] = []
-            for effort in best_efforts:
-                effort_item: dict[str, Any] = {
-                    "name": effort.name,
-                    "elapsed_time_seconds": effort.elapsed_time,
-                }
+            for effort in result.efforts:
+                effort_item: dict[str, Any] = {}
 
-                if effort.moving_time:
-                    effort_item["moving_time_seconds"] = effort.moving_time
-                if effort.distance:
-                    effort_item["distance_meters"] = effort.distance
-
-                # Performance metrics
-                performance: dict[str, Any] = {}
-                if effort.average_watts:
-                    performance["average_watts"] = effort.average_watts
-                if effort.normalized_power:
-                    performance["normalized_power"] = effort.normalized_power
-                if effort.average_heartrate:
-                    performance["average_heartrate"] = effort.average_heartrate
-                if effort.average_cadence:
-                    performance["average_cadence"] = effort.average_cadence
-                if effort.average_speed:
-                    performance["average_speed_meters_per_sec"] = effort.average_speed
-
-                if performance:
-                    effort_item["performance"] = performance
-
-                # Location in activity
+                if effort.average is not None:
+                    effort_item["average"] = round(effort.average, 1)
+                if effort.duration is not None:
+                    effort_item["duration_seconds"] = effort.duration
+                if effort.distance is not None:
+                    effort_item["distance_meters"] = round(effort.distance, 1)
                 if effort.start_index is not None:
                     effort_item["start_index"] = effort.start_index
                 if effort.end_index is not None:
@@ -280,8 +292,15 @@ async def get_best_efforts(
 
                 efforts_data.append(effort_item)
 
+            query_info: dict[str, Any] = {"stream": stream}
+            if duration is not None:
+                query_info["duration_seconds"] = duration
+            if distance is not None:
+                query_info["distance_meters"] = distance
+
             result_data = {
                 "activity_id": activity_id,
+                "query": query_info,
                 "best_efforts": efforts_data,
                 "count": len(efforts_data),
             }

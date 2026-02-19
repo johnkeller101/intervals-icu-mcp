@@ -13,6 +13,9 @@ from ..response_builder import ResponseBuilder
 async def get_recent_activities(
     limit: Annotated[int, "Number of activities to fetch"] = 30,
     days_back: Annotated[int, "Number of days to look back"] = 30,
+    oldest: Annotated[str | None, "Oldest date (ISO-8601, e.g., '2026-01-01'). Overrides days_back if provided."] = None,
+    newest: Annotated[str | None, "Newest date (ISO-8601, e.g., '2026-02-01'). Defaults to now."] = None,
+    activity_type: Annotated[str | None, "Filter by activity type (e.g., 'Ride', 'Run', 'Swim'). Case-insensitive."] = None,
     ctx: Context | None = None,
 ) -> str:
     """Get recent activities for the authenticated athlete.
@@ -20,9 +23,16 @@ async def get_recent_activities(
     Returns a summary of recent activities including key metrics like distance,
     duration, power, heart rate, and training load.
 
+    Supports both relative (days_back) and absolute (oldest/newest) date ranges.
+    If oldest is provided, it overrides days_back. Use activity_type to filter
+    by sport (e.g., 'Ride', 'Run', 'Swim').
+
     Args:
         limit: Number of activities to fetch (default 30, max 100)
         days_back: Number of days to look back (default 30)
+        oldest: Explicit oldest date (overrides days_back)
+        newest: Explicit newest date (defaults to now)
+        activity_type: Filter by type (case-insensitive)
 
     Returns:
         JSON string with activity summaries
@@ -32,19 +42,31 @@ async def get_recent_activities(
 
     try:
         # Calculate date range
-        oldest_date = datetime.now() - timedelta(days=days_back)
-        oldest = oldest_date.strftime("%Y-%m-%d")
+        if oldest:
+            oldest_str = oldest
+        else:
+            oldest_date = datetime.now() - timedelta(days=days_back)
+            oldest_str = oldest_date.strftime("%Y-%m-%d")
 
         async with ICUClient(config) as client:
             activities = await client.get_activities(
-                oldest=oldest,
+                oldest=oldest_str,
+                newest=newest,
                 limit=min(limit, 100),  # Cap at 100
             )
 
+            # Client-side type filter (API doesn't support it natively)
+            if activity_type:
+                type_lower = activity_type.lower()
+                activities = [a for a in activities if a.type and a.type.lower() == type_lower]
+
             if not activities:
+                meta_msg = "No activities found"
+                if activity_type:
+                    meta_msg += f" of type '{activity_type}'"
                 return ResponseBuilder.build_response(
                     data={"activities": [], "count": 0},
-                    metadata={"message": "No activities found"},
+                    metadata={"message": meta_msg},
                 )
 
             activities_data: list[dict[str, Any]] = []
@@ -83,9 +105,18 @@ async def get_recent_activities(
 
                 activities_data.append(activity_item)
 
+            metadata: dict[str, Any] = {
+                "date_range": {"oldest": oldest_str},
+            }
+            if newest:
+                metadata["date_range"]["newest"] = newest
+            if activity_type:
+                metadata["filter"] = {"activity_type": activity_type}
+
             return ResponseBuilder.build_response(
                 data={"activities": activities_data, "count": len(activities_data)},
                 query_type="recent_activities",
+                metadata=metadata,
             )
 
     except ICUAPIError as e:
