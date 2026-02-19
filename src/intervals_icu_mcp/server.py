@@ -50,7 +50,7 @@ from .tools.event_management import (
     mark_event_done,
     update_event,
 )
-from .tools.events import get_calendar_events, get_event, get_upcoming_workouts
+from .tools.events import get_calendar_events, get_event, get_upcoming_workouts, search_events
 from .tools.gear import (
     create_gear,
     create_gear_reminder,
@@ -105,6 +105,7 @@ mcp.tool()(update_wellness)
 mcp.tool()(get_calendar_events)
 mcp.tool()(get_upcoming_workouts)
 mcp.tool()(get_event)
+mcp.tool()(search_events)
 mcp.tool()(create_event)
 mcp.tool()(update_event)
 mcp.tool()(delete_event)

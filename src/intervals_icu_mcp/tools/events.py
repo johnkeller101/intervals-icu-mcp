@@ -332,3 +332,104 @@ async def get_event(
         return ResponseBuilder.build_error_response(
             f"Unexpected error: {str(e)}", error_type="internal_error"
         )
+
+
+async def search_events(
+    query: Annotated[str, "Search term to match against event names (case-insensitive)"],
+    days_ahead: Annotated[int, "Number of days to search ahead from today"] = 365,
+    days_back: Annotated[int, "Number of days to search back from today"] = 30,
+    category: Annotated[
+        str | None,
+        "Filter by category: WORKOUT, NOTE, RACE_A, RACE_B, RACE_C, TARGET, etc.",
+    ] = None,
+    ctx: Context | None = None,
+) -> str:
+    """Search for calendar events by name.
+
+    Finds events whose name contains the search query (case-insensitive).
+    Returns matching events with their IDs, dates, and details. Useful for
+    finding a specific event when you know part of its name.
+
+    Args:
+        query: Text to search for in event names
+        days_ahead: How many days ahead to search (default 365)
+        days_back: How many days back to search (default 30)
+        category: Optional category filter
+
+    Returns:
+        JSON string with matching events including their IDs
+    """
+    assert ctx is not None
+    config: ICUConfig = ctx.get_state("config")
+
+    try:
+        oldest_date = datetime.now() - timedelta(days=days_back)
+        newest_date = datetime.now() + timedelta(days=days_ahead)
+
+        oldest = oldest_date.strftime("%Y-%m-%d")
+        newest = newest_date.strftime("%Y-%m-%d")
+
+        async with ICUClient(config) as client:
+            events = await client.get_events(
+                oldest=oldest,
+                newest=newest,
+            )
+
+            # Filter by name (case-insensitive substring match)
+            query_lower = query.lower()
+            matches = [
+                e for e in events
+                if e.name and query_lower in e.name.lower()
+            ]
+
+            # Filter by category if specified
+            if category:
+                cat_upper = category.upper()
+                matches = [e for e in matches if e.category == cat_upper]
+
+            if not matches:
+                return ResponseBuilder.build_response(
+                    data={"events": [], "count": 0},
+                    metadata={
+                        "message": f"No events found matching '{query}' "
+                        f"between {oldest} and {newest}",
+                        "search_query": query,
+                    },
+                )
+
+            # Sort by date
+            matches.sort(key=lambda x: x.start_date_local)
+
+            results: list[dict[str, Any]] = []
+            for event in matches:
+                item: dict[str, Any] = {
+                    "id": event.id,
+                    "date": event.start_date_local[:10],
+                    "name": event.name,
+                    "category": event.category,
+                }
+
+                if event.type:
+                    item["type"] = event.type
+                if event.moving_time:
+                    item["duration_seconds"] = event.moving_time
+                if event.description:
+                    item["description"] = event.description.strip()[:200]
+
+                results.append(item)
+
+            return ResponseBuilder.build_response(
+                data={"events": results, "count": len(results)},
+                query_type="search_events",
+                metadata={
+                    "search_query": query,
+                    "date_range": {"oldest": oldest, "newest": newest},
+                },
+            )
+
+    except ICUAPIError as e:
+        return ResponseBuilder.build_error_response(e.message, error_type="api_error")
+    except Exception as e:
+        return ResponseBuilder.build_error_response(
+            f"Unexpected error: {str(e)}", error_type="internal_error"
+        )
