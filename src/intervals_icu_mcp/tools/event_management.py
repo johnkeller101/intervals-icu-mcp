@@ -44,6 +44,27 @@ VALID_CATEGORIES = [
     "SEASON_START", "TARGET", "SET_FITNESS",
 ]
 
+# Common mistakes with specific fix suggestions
+_CATEGORY_SUGGESTIONS = {
+    "RACE": "Use RACE_A (priority), RACE_B, or RACE_C instead of RACE",
+    "GOAL": "Use TARGET instead of GOAL",
+    "REST": "Use HOLIDAY instead of REST",
+    "INJURY": "Use INJURED instead of INJURY",
+    "FTP": "Use SET_EFTP instead of FTP",
+}
+
+
+def _category_error_message(invalid_category: str, prefix: str = "") -> str:
+    """Build a helpful error message for an invalid event category."""
+    upper = invalid_category.upper()
+    suggestion = _CATEGORY_SUGGESTIONS.get(upper)
+    if suggestion:
+        return f"{prefix}Invalid category '{invalid_category}'. {suggestion}."
+    return (
+        f"{prefix}Invalid category '{invalid_category}'. "
+        f"Must be one of: {', '.join(VALID_CATEGORIES)}"
+    )
+
 
 async def create_event(
     start_date: Annotated[
@@ -87,10 +108,9 @@ async def create_event(
     config: ICUConfig = ctx.get_state("config")
 
     # Validate category
-    valid_categories = VALID_CATEGORIES
-    if category.upper() not in valid_categories:
+    if category.upper() not in VALID_CATEGORIES:
         return ResponseBuilder.build_error_response(
-            f"Invalid category. Must be one of: {', '.join(valid_categories)}",
+            _category_error_message(category),
             error_type="validation_error",
         )
 
@@ -345,7 +365,6 @@ async def bulk_create_events(
         events_data: list[dict[str, Any]] = parsed_data  # type: ignore[assignment]
 
         # Validate each event
-        valid_categories = VALID_CATEGORIES
         for i, event_data in enumerate(events_data):
             if "start_date_local" not in event_data:
                 return ResponseBuilder.build_error_response(
@@ -361,9 +380,9 @@ async def bulk_create_events(
                     f"Event {i}: Missing required field 'category'",
                     error_type="validation_error",
                 )
-            if event_data["category"].upper() not in valid_categories:
+            if event_data["category"].upper() not in VALID_CATEGORIES:
                 return ResponseBuilder.build_error_response(
-                    f"Event {i}: Invalid category. Must be one of: {', '.join(valid_categories)}",
+                    _category_error_message(event_data["category"], prefix=f"Event {i}: "),
                     error_type="validation_error",
                 )
 
