@@ -823,6 +823,26 @@ class ICUClient:
         )
         return Event(**response.json())
 
+    async def mark_event_done(
+        self,
+        event_id: int,
+        athlete_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Mark a planned event as done by creating a matching manual activity.
+
+        Args:
+            event_id: Event ID to mark as done
+            athlete_id: Athlete ID (uses config default if not provided)
+
+        Returns:
+            Response data from the API
+        """
+        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        response = await self._request(
+            "POST", f"/athlete/{athlete_id}/events/{event_id}/mark-done", json={}
+        )
+        return response.json()
+
     async def delete_event(
         self,
         event_id: int,
