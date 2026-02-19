@@ -114,6 +114,16 @@ class ICUClient:
             if response.status_code == 429:
                 raise ICUAPIError("Rate limit exceeded. Please try again later.", 429)
 
+            if response.status_code == 400:
+                # Include the request payload in the error for debugging
+                payload = kwargs.get("json", kwargs.get("data", "N/A"))
+                raise ICUAPIError(
+                    f"HTTP 400 Bad Request: {response.text}. "
+                    f"Endpoint: {method} {endpoint}. "
+                    f"Payload sent: {payload}",
+                    400,
+                )
+
             response.raise_for_status()
             return response
 
