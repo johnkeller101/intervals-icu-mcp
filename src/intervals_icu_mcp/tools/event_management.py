@@ -44,24 +44,32 @@ VALID_CATEGORIES = [
     "SEASON_START", "TARGET", "SET_FITNESS",
 ]
 
-# Common mistakes with specific fix suggestions
-_CATEGORY_SUGGESTIONS = {
-    "RACE": "Use RACE_A (priority), RACE_B, or RACE_C instead of RACE",
-    "GOAL": "Use TARGET instead of GOAL",
-    "REST": "Use HOLIDAY instead of REST",
-    "INJURY": "Use INJURED instead of INJURY",
-    "FTP": "Use SET_EFTP instead of FTP",
+# Auto-correct common category mistakes to valid API values
+_CATEGORY_ALIASES = {
+    "RACE": "RACE_A",
+    "GOAL": "TARGET",
+    "REST": "HOLIDAY",
+    "INJURY": "INJURED",
+    "FTP": "SET_EFTP",
 }
 
 
-def _category_error_message(invalid_category: str, prefix: str = "") -> str:
-    """Build a helpful error message for an invalid event category."""
-    upper = invalid_category.upper()
-    suggestion = _CATEGORY_SUGGESTIONS.get(upper)
-    if suggestion:
-        return f"{prefix}Invalid category '{invalid_category}'. {suggestion}."
-    return (
-        f"{prefix}Invalid category '{invalid_category}'. "
+def _normalize_category(category: str) -> str:
+    """Normalize an event category, auto-correcting common mistakes.
+
+    Returns the corrected category if it's a known alias, or the
+    uppercased original if already valid. Raises ValueError if unknown.
+    """
+    upper = category.upper()
+    # Auto-correct known aliases
+    if upper in _CATEGORY_ALIASES:
+        return _CATEGORY_ALIASES[upper]
+    # Already valid
+    if upper in VALID_CATEGORIES:
+        return upper
+    # Unknown category
+    raise ValueError(
+        f"Invalid category '{category}'. "
         f"Must be one of: {', '.join(VALID_CATEGORIES)}"
     )
 
@@ -107,10 +115,12 @@ async def create_event(
     assert ctx is not None
     config: ICUConfig = ctx.get_state("config")
 
-    # Validate category
-    if category.upper() not in VALID_CATEGORIES:
+    # Validate and normalize category (auto-corrects RACE→RACE_A, GOAL→TARGET, etc.)
+    try:
+        normalized_category = _normalize_category(category)
+    except ValueError as e:
         return ResponseBuilder.build_error_response(
-            _category_error_message(category),
+            str(e),
             error_type="validation_error",
         )
 
@@ -128,7 +138,7 @@ async def create_event(
         event_data: dict[str, Any] = {
             "start_date_local": start_date_local,
             "name": name,
-            "category": category.upper(),
+            "category": normalized_category,
         }
 
         if description:
@@ -380,14 +390,13 @@ async def bulk_create_events(
                     f"Event {i}: Missing required field 'category'",
                     error_type="validation_error",
                 )
-            if event_data["category"].upper() not in VALID_CATEGORIES:
+            try:
+                event_data["category"] = _normalize_category(event_data["category"])
+            except ValueError as e:
                 return ResponseBuilder.build_error_response(
-                    _category_error_message(event_data["category"], prefix=f"Event {i}: "),
+                    f"Event {i}: {e}",
                     error_type="validation_error",
                 )
-
-            # Normalize category to uppercase
-            event_data["category"] = event_data["category"].upper()
 
             # Validate date format
             try:
