@@ -47,6 +47,7 @@ from .tools.event_management import (
     create_event,
     delete_event,
     duplicate_event,
+    mark_event_done,
     update_event,
 )
 from .tools.events import get_calendar_events, get_event, get_upcoming_workouts
@@ -110,6 +111,7 @@ mcp.tool()(delete_event)
 mcp.tool()(bulk_create_events)
 mcp.tool()(bulk_delete_events)
 mcp.tool()(duplicate_event)
+mcp.tool()(mark_event_done)
 
 # Register performance/curve tools
 mcp.tool()(get_power_curves)

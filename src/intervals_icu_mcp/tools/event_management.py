@@ -10,8 +10,40 @@ from ..client import ICUAPIError, ICUClient
 from ..response_builder import ResponseBuilder
 
 
+def parse_start_date_local(date_str: str) -> str:
+    """Parse a date or datetime string and return ISO format for Intervals.icu API.
+
+    Accepts:
+        - YYYY-MM-DD (date only, defaults to midnight)
+        - YYYY-MM-DDTHH:MM:SS (full datetime)
+        - YYYY-MM-DDTHH:MM (datetime without seconds)
+
+    Returns:
+        ISO format string like "2025-12-08T15:00:00"
+    """
+    if "T" in date_str:
+        for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"]:
+            try:
+                dt = datetime.strptime(date_str, fmt)
+                return dt.strftime("%Y-%m-%dT%H:%M:%S")
+            except ValueError:
+                continue
+
+    try:
+        dt = datetime.strptime(date_str[:10], "%Y-%m-%d")
+        return dt.strftime("%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        pass
+
+    raise ValueError(f"Invalid date format: {date_str}. Use YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS")
+
+
 async def create_event(
-    start_date: Annotated[str, "Start date in YYYY-MM-DD format"],
+    start_date: Annotated[
+        str,
+        "Start date/time. Accepts YYYY-MM-DD (defaults to midnight), "
+        "YYYY-MM-DDTHH:MM:SS, or YYYY-MM-DDTHH:MM",
+    ],
     name: Annotated[str, "Event name"],
     category: Annotated[str, "Event category: WORKOUT, NOTE, RACE, or GOAL"],
     description: Annotated[str | None, "Event description (optional)"] = None,
@@ -27,7 +59,8 @@ async def create_event(
     planned metrics, notes for tracking information, races, or training goals.
 
     Args:
-        start_date: Date in ISO-8601 format (YYYY-MM-DD)
+        start_date: Date/time string. Accepts YYYY-MM-DD (defaults to midnight),
+            YYYY-MM-DDTHH:MM:SS (specific time), or YYYY-MM-DDTHH:MM
         name: Name of the event
         category: Type of event - WORKOUT, NOTE, RACE, or GOAL
         description: Optional detailed description
@@ -50,19 +83,19 @@ async def create_event(
             error_type="validation_error",
         )
 
-    # Validate date format
+    # Validate and parse date format
     try:
-        datetime.strptime(start_date, "%Y-%m-%d")
-    except ValueError:
+        start_date_local = parse_start_date_local(start_date)
+    except ValueError as e:
         return ResponseBuilder.build_error_response(
-            "Invalid date format. Please use YYYY-MM-DD format.",
+            str(e),
             error_type="validation_error",
         )
 
     try:
         # Build event data
         event_data: dict[str, Any] = {
-            "start_date_local": start_date,
+            "start_date_local": start_date_local,
             "name": name,
             "category": category.upper(),
         }
@@ -117,7 +150,10 @@ async def update_event(
     event_id: Annotated[int, "Event ID to update"],
     name: Annotated[str | None, "Updated event name"] = None,
     description: Annotated[str | None, "Updated description"] = None,
-    start_date: Annotated[str | None, "Updated start date (YYYY-MM-DD)"] = None,
+    start_date: Annotated[
+        str | None,
+        "Updated start date/time. Accepts YYYY-MM-DD, YYYY-MM-DDTHH:MM:SS, or YYYY-MM-DDTHH:MM",
+    ] = None,
     event_type: Annotated[str | None, "Updated activity type"] = None,
     duration_seconds: Annotated[int | None, "Updated duration in seconds"] = None,
     distance_meters: Annotated[float | None, "Updated distance in meters"] = None,
@@ -133,7 +169,7 @@ async def update_event(
         event_id: ID of the event to update
         name: New name for the event
         description: New description
-        start_date: New start date in YYYY-MM-DD format
+        start_date: New start date/time. Accepts YYYY-MM-DD, YYYY-MM-DDTHH:MM:SS, or YYYY-MM-DDTHH:MM
         event_type: New activity type
         duration_seconds: New planned duration
         distance_meters: New planned distance
@@ -145,13 +181,14 @@ async def update_event(
     assert ctx is not None
     config: ICUConfig = ctx.get_state("config")
 
-    # Validate date format if provided
+    # Validate and parse date format if provided
+    start_date_local = None
     if start_date:
         try:
-            datetime.strptime(start_date, "%Y-%m-%d")
-        except ValueError:
+            start_date_local = parse_start_date_local(start_date)
+        except ValueError as e:
             return ResponseBuilder.build_error_response(
-                "Invalid date format. Please use YYYY-MM-DD format.",
+                str(e),
                 error_type="validation_error",
             )
 
@@ -163,8 +200,8 @@ async def update_event(
             event_data["name"] = name
         if description is not None:
             event_data["description"] = description
-        if start_date is not None:
-            event_data["start_date_local"] = start_date
+        if start_date_local is not None:
+            event_data["start_date_local"] = start_date_local
         if event_type is not None:
             event_data["type"] = event_type
         if duration_seconds is not None:
@@ -422,6 +459,42 @@ async def bulk_delete_events(
                 data={"deleted_count": len(ids_list), "event_ids": ids_list, "result": result},
                 query_type="bulk_delete_events",
                 metadata={"message": f"Successfully deleted {len(ids_list)} events"},
+            )
+
+    except ICUAPIError as e:
+        return ResponseBuilder.build_error_response(e.message, error_type="api_error")
+    except Exception as e:
+        return ResponseBuilder.build_error_response(
+            f"Unexpected error: {str(e)}", error_type="internal_error"
+        )
+
+
+async def mark_event_done(
+    event_id: Annotated[int, "Event ID to mark as done"],
+    ctx: Context | None = None,
+) -> str:
+    """Mark a planned workout/event as done by creating a matching manual activity.
+
+    This converts an incomplete event (showing red/0%) to completed (green/100%).
+    The event must exist and be in the past or present.
+
+    Args:
+        event_id: The Intervals.icu event ID to mark as done
+
+    Returns:
+        JSON string with confirmation and created activity data
+    """
+    assert ctx is not None
+    config: ICUConfig = ctx.get_state("config")
+
+    try:
+        async with ICUClient(config) as client:
+            result = await client.mark_event_done(event_id)
+
+            return ResponseBuilder.build_response(
+                data=result,
+                query_type="mark_event_done",
+                metadata={"message": f"Successfully marked event {event_id} as done"},
             )
 
     except ICUAPIError as e:
