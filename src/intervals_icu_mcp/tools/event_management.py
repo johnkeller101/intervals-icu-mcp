@@ -38,6 +38,13 @@ def parse_start_date_local(date_str: str) -> str:
     raise ValueError(f"Invalid date format: {date_str}. Use YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS")
 
 
+VALID_CATEGORIES = [
+    "WORKOUT", "RACE_A", "RACE_B", "RACE_C", "NOTE", "PLAN",
+    "HOLIDAY", "SICK", "INJURED", "SET_EFTP", "FITNESS_DAYS",
+    "SEASON_START", "TARGET", "SET_FITNESS",
+]
+
+
 async def create_event(
     start_date: Annotated[
         str,
@@ -45,7 +52,11 @@ async def create_event(
         "YYYY-MM-DDTHH:MM:SS, or YYYY-MM-DDTHH:MM",
     ],
     name: Annotated[str, "Event name"],
-    category: Annotated[str, "Event category: WORKOUT, NOTE, RACE, or GOAL"],
+    category: Annotated[
+        str,
+        "Event category: WORKOUT, NOTE, RACE_A, RACE_B, RACE_C, TARGET, "
+        "PLAN, HOLIDAY, SICK, INJURED, SET_EFTP, FITNESS_DAYS, SEASON_START, SET_FITNESS",
+    ],
     description: Annotated[str | None, "Event description (optional)"] = None,
     event_type: Annotated[str | None, "Activity type (e.g., Ride, Run, Swim)"] = None,
     duration_seconds: Annotated[int | None, "Planned duration in seconds"] = None,
@@ -62,7 +73,7 @@ async def create_event(
         start_date: Date/time string. Accepts YYYY-MM-DD (defaults to midnight),
             YYYY-MM-DDTHH:MM:SS (specific time), or YYYY-MM-DDTHH:MM
         name: Name of the event
-        category: Type of event - WORKOUT, NOTE, RACE, or GOAL
+        category: Type of event - WORKOUT, NOTE, RACE_A, RACE_B, RACE_C, TARGET, etc.
         description: Optional detailed description
         event_type: Activity type (e.g., "Ride", "Run", "Swim") for workouts
         duration_seconds: Planned duration for workouts
@@ -76,7 +87,7 @@ async def create_event(
     config: ICUConfig = ctx.get_state("config")
 
     # Validate category
-    valid_categories = ["WORKOUT", "NOTE", "RACE", "GOAL"]
+    valid_categories = VALID_CATEGORIES
     if category.upper() not in valid_categories:
         return ResponseBuilder.build_error_response(
             f"Invalid category. Must be one of: {', '.join(valid_categories)}",
@@ -334,7 +345,7 @@ async def bulk_create_events(
         events_data: list[dict[str, Any]] = parsed_data  # type: ignore[assignment]
 
         # Validate each event
-        valid_categories = ["WORKOUT", "NOTE", "RACE", "GOAL"]
+        valid_categories = VALID_CATEGORIES
         for i, event_data in enumerate(events_data):
             if "start_date_local" not in event_data:
                 return ResponseBuilder.build_error_response(
