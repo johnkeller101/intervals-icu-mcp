@@ -31,15 +31,25 @@ from .models import (
 class ICUAPIError(Exception):
     """Custom exception for Intervals.icu API errors."""
 
-    def __init__(self, message: str, status_code: int | None = None):
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        response_text: str | None = None,
+        request_payload: Any | None = None,
+    ):
         """Initialize API error.
 
         Args:
             message: Error message
             status_code: HTTP status code if available
+            response_text: Raw response body from the API
+            request_payload: The payload that was sent (for diagnosis)
         """
         self.message = message
         self.status_code = status_code
+        self.response_text = response_text
+        self.request_payload = request_payload
         super().__init__(self.message)
 
 
@@ -115,13 +125,12 @@ class ICUClient:
                 raise ICUAPIError("Rate limit exceeded. Please try again later.", 429)
 
             if response.status_code == 400:
-                # Include the request payload in the error for debugging
-                payload = kwargs.get("json", kwargs.get("data", "N/A"))
+                payload = kwargs.get("json", kwargs.get("data"))
                 raise ICUAPIError(
-                    f"HTTP 400 Bad Request: {response.text}. "
-                    f"Endpoint: {method} {endpoint}. "
-                    f"Payload sent: {payload}",
-                    400,
+                    f"Bad Request on {method} {endpoint}: {response.text}",
+                    status_code=400,
+                    response_text=response.text,
+                    request_payload=payload,
                 )
 
             response.raise_for_status()
