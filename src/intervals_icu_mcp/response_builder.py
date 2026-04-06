@@ -11,18 +11,58 @@ across all MCP tools. All tools return JSON with a standard structure:
 """
 
 import json
-from datetime import datetime
+import re
+from datetime import date, datetime
 from typing import Any, cast
 
+# Keys whose string values should be enriched with day-of-week
+_DATE_KEYS = frozenset({
+    "date",
+    "start_date",
+    "end_date",
+    "start_date_local",
+    "end_date_local",
+    "oldest",
+    "newest",
+    "snoozed_until",
+    "dob",
+    "fetched_at",
+})
 
-def _convert_datetimes(obj: Any) -> Any:  # type: ignore[misc]
-    """Recursively convert datetime objects to ISO strings."""
+# Matches YYYY-MM-DD with optional time component
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+
+
+def _add_day_of_week(value: str) -> str:
+    """Append day-of-week to an ISO date/datetime string.
+
+    '2025-01-15' -> '2025-01-15 (Wednesday)'
+    '2025-01-15T14:30:00' -> '2025-01-15T14:30:00 (Wednesday)'
+    """
+    match = _ISO_DATE_RE.match(value)
+    if not match:
+        return value
+    try:
+        parsed = datetime.strptime(match.group(), "%Y-%m-%d")
+        return f"{value} ({parsed.strftime('%A')})"
+    except ValueError:
+        return value
+
+
+def _convert_datetimes(obj: Any, _key: str | None = None) -> Any:  # type: ignore[misc]
+    """Recursively convert datetime/date objects and enrich date strings with day-of-week."""
     if isinstance(obj, datetime):
-        return obj.isoformat()
+        iso = obj.isoformat()
+        return f"{iso} ({obj.strftime('%A')})"
+    elif isinstance(obj, date):
+        iso = obj.isoformat()
+        return f"{iso} ({obj.strftime('%A')})"
     elif isinstance(obj, dict):
-        return {str(k): _convert_datetimes(v) for k, v in obj.items()}  # type: ignore[misc]
+        return {str(k): _convert_datetimes(v, _key=str(k)) for k, v in obj.items()}  # type: ignore[misc]
     elif isinstance(obj, list):
-        return [_convert_datetimes(item) for item in obj]  # type: ignore[misc]
+        return [_convert_datetimes(item, _key=_key) for item in obj]  # type: ignore[misc]
+    elif isinstance(obj, str) and _key and _key in _DATE_KEYS and _ISO_DATE_RE.match(obj):
+        return _add_day_of_week(obj)
     return obj
 
 
@@ -98,7 +138,8 @@ class ResponseBuilder:
         # Build metadata with timestamp
         meta = metadata or {}
         converted_meta = cast(dict[str, Any], _convert_datetimes(meta))
-        converted_meta["fetched_at"] = datetime.now().isoformat()
+        now = datetime.now()
+        converted_meta["fetched_at"] = f"{now.isoformat()} ({now.strftime('%A')})"
         if query_type:
             converted_meta["query_type"] = query_type
 
@@ -126,7 +167,7 @@ class ResponseBuilder:
             "error": {
                 "message": error_message,
                 "type": error_type,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": f"{datetime.now().isoformat()} ({datetime.now().strftime('%A')})",
             }
         }
 
