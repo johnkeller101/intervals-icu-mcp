@@ -150,22 +150,7 @@ def _diagnose_event_error(error: ICUAPIError) -> str:
     specific guidance on how to fix them.
     """
     suggestions: list[str] = []
-    payload = error.request_payload or {}
-
-    if not isinstance(payload, dict):
-        return ResponseBuilder.build_error_response(
-            "The event payload must be a JSON object (dict), not a "
-            f"{type(payload).__name__}. Build a dict with keys like "
-            "'start_date_local', 'name', 'category', 'type', etc.",
-            error_type="validation_error",
-            suggestions=[
-                "Payload must be a JSON object with string keys.",
-                "Required keys: start_date_local, name, category.",
-                "Example: {\"start_date_local\": \"2026-03-01\", "
-                "\"name\": \"Easy Ride\", \"category\": \"WORKOUT\", "
-                "\"type\": \"Ride\"}",
-            ],
-        )
+    payload: dict[str, object] = error.request_payload or {}
 
     # Check for wrong field names
     for key in list(payload.keys()):
@@ -349,7 +334,7 @@ async def create_event(
         JSON string with created event data
     """
     assert ctx is not None
-    config: ICUConfig = ctx.get_state("config")
+    config: ICUConfig = await ctx.get_state("config")
 
     # Validate and normalize category (auto-corrects RACE→RACE_A, GOAL→TARGET, etc.)
     try:
@@ -469,7 +454,7 @@ async def update_event(
         JSON string with updated event data
     """
     assert ctx is not None
-    config: ICUConfig = ctx.get_state("config")
+    config: ICUConfig = await ctx.get_state("config")
 
     # Validate and parse date format if provided
     start_date_local = None
@@ -559,7 +544,7 @@ async def delete_event(
         JSON string with deletion confirmation
     """
     assert ctx is not None
-    config: ICUConfig = ctx.get_state("config")
+    config: ICUConfig = await ctx.get_state("config")
 
     try:
         async with ICUClient(config) as client:
@@ -606,7 +591,7 @@ async def bulk_create_events(
         JSON string with created events
     """
     assert ctx is not None
-    config: ICUConfig = ctx.get_state("config")
+    config: ICUConfig = await ctx.get_state("config")
 
     try:
         import json
@@ -736,7 +721,7 @@ async def bulk_delete_events(
         JSON string with deletion confirmation
     """
     assert ctx is not None
-    config: ICUConfig = ctx.get_state("config")
+    config: ICUConfig = await ctx.get_state("config")
 
     try:
         import json
@@ -797,7 +782,7 @@ async def mark_event_done(
         JSON string with confirmation and created activity data
     """
     assert ctx is not None
-    config: ICUConfig = ctx.get_state("config")
+    config: ICUConfig = await ctx.get_state("config")
 
     try:
         async with ICUClient(config) as client:
@@ -837,7 +822,7 @@ async def duplicate_event(
         JSON string with the duplicated event
     """
     assert ctx is not None
-    config: ICUConfig = ctx.get_state("config")
+    config: ICUConfig = await ctx.get_state("config")
 
     # Validate date format
     try:
