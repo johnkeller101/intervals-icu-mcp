@@ -25,6 +25,7 @@ build-backend = "hatchling.build"
 dev = [
     "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",
+    "pytest-cov>=4.0",
     "respx>=0.22.0",
     "ruff>=0.14.0",
     "pyright>=1.1.406",
@@ -36,6 +37,12 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+
+[tool.coverage.run]
+omit = [
+    "src/intervals_icu_mcp/server.py",
+    "src/intervals_icu_mcp/scripts/*",
+]
 
 [tool.ruff]
 line-length = 100

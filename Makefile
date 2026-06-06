@@ -32,7 +32,7 @@ clean: ## Clean up cache files and build artifacts
 can-release: test lint ## Run all the same checks as CI to ensure code can be released
 
 test: ## Run the test suite
-	uv run pytest
+	uv run pytest --cov=src/intervals_icu_mcp --cov-fail-under=85
 
 test/%: ## Run tests with a filter (e.g., make test/activity)
 	uv run pytest -k $*
