@@ -87,6 +87,10 @@ async def get_calendar_events(
                     "category": event.category,
                 }
 
+                # Include start time if the event has one
+                if event.start_date_local and "T" in event.start_date_local:
+                    event_item["start_time"] = event.start_date_local[11:16]  # HH:MM
+
                 if event.type:
                     event_item["type"] = event.type
 
@@ -208,6 +212,9 @@ async def get_upcoming_workouts(
                     "name": workout.name or "Workout",
                 }
 
+                if workout.start_date_local and "T" in workout.start_date_local:
+                    workout_item["start_time"] = workout.start_date_local[11:16]
+
                 if workout.type:
                     workout_item["type"] = workout.type
 
@@ -280,6 +287,9 @@ async def get_event(
                 "name": event.name or event.category or "Event",
                 "category": event.category,
             }
+
+            if event.start_date_local and "T" in event.start_date_local:
+                event_data["start_time"] = event.start_date_local[11:16]
 
             if event.description:
                 event_data["description"] = event.description
@@ -408,6 +418,9 @@ async def search_events(
                     "name": event.name,
                     "category": event.category,
                 }
+
+                if event.start_date_local and "T" in event.start_date_local:
+                    item["start_time"] = event.start_date_local[11:16]
 
                 if event.type:
                     item["type"] = event.type
