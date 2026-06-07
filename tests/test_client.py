@@ -1,7 +1,5 @@
 """Tests for client module."""
 
-import json
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import respx

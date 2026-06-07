@@ -1,9 +1,6 @@
 """Additional tests for event_management to improve coverage."""
 
 import json
-from unittest.mock import AsyncMock, MagicMock
-
-from httpx import Response
 
 from intervals_icu_mcp.client import ICUAPIError
 from intervals_icu_mcp.tools.event_management import (
