@@ -342,15 +342,17 @@ class Interval(BaseModel):
 class ActivityStreams(BaseModel):
     """Time-series data streams for an activity."""
 
-    watts: list[int | None] | None = None
-    heartrate: list[int | None] | None = None
-    cadence: list[int | None] | None = None
+    model_config = ConfigDict(extra="allow")
+
+    watts: list[int | float | None] | None = None
+    heartrate: list[int | float | None] | None = None
+    cadence: list[int | float | None] | None = None
     velocity_smooth: list[float | None] | None = None
     altitude: list[float | None] | None = None
     distance: list[float | None] | None = None
     time: list[int | None] | None = None
-    latlng: list[list[float] | None] | None = None
-    temp: list[int | None] | None = None
+    latlng: list[Any] | None = None
+    temp: list[int | float | None] | None = None
     moving: list[bool | None] | None = None
     grade_smooth: list[float | None] | None = None
 
@@ -417,9 +419,11 @@ class Gear(BaseModel):
 class HistogramBin(BaseModel):
     """Single bin in a histogram."""
 
+    model_config = ConfigDict(extra="allow")
+
     min: float  # Minimum value for this bin
     max: float  # Maximum value for this bin
-    count: int  # Number of data points in this bin
+    count: int | None = None  # Number of data points in this bin
     secs: int | None = None  # Time spent in this bin (seconds)
 
 
