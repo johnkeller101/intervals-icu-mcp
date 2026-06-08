@@ -702,8 +702,15 @@ class ICUClient:
             List of Interval objects
         """
         response = await self._request("GET", f"/activity/{activity_id}/intervals")
+        raw: dict[str, Any] | list[Any] = response.json()
+        # API returns {id, analyzed, icu_intervals, icu_groups} — intervals are in icu_intervals
+        intervals_list: list[Any]
+        if isinstance(raw, dict):
+            intervals_list = list(raw.get("icu_intervals", []))
+        else:
+            intervals_list = list(raw)
         adapter = TypeAdapter(list[Interval])
-        return adapter.validate_python(response.json())
+        return adapter.validate_python(intervals_list)
 
     async def get_activity_streams(
         self,
@@ -725,7 +732,15 @@ class ICUClient:
             params["types"] = ",".join(streams)
 
         response = await self._request("GET", f"/activity/{activity_id}/streams", params=params)
-        return ActivityStreams(**response.json())
+        raw: dict[str, Any] | list[dict[str, Any]] = response.json()
+        # API returns a list of {type, name, data, ...} objects — convert to dict keyed by type
+        if isinstance(raw, list):
+            streams_dict: dict[str, Any] = {}
+            for entry in raw:
+                if "type" in entry:
+                    streams_dict[str(entry["type"])] = entry.get("data")
+            return ActivityStreams(**streams_dict)
+        return ActivityStreams(**raw)
 
     async def get_best_efforts(
         self,
