@@ -377,7 +377,10 @@ class ICUClient:
             Histogram with power distribution bins
         """
         response = await self._request("GET", f"/activity/{activity_id}/power-histogram")
-        return Histogram(**response.json())
+        raw: dict[str, Any] | list[dict[str, Any]] = response.json()
+        if isinstance(raw, list):
+            return Histogram.model_validate({"bins": raw})
+        return Histogram(**raw)
 
     async def get_hr_histogram(
         self,
@@ -392,7 +395,10 @@ class ICUClient:
             Histogram with HR distribution bins
         """
         response = await self._request("GET", f"/activity/{activity_id}/hr-histogram")
-        return Histogram(**response.json())
+        raw: dict[str, Any] | list[dict[str, Any]] = response.json()
+        if isinstance(raw, list):
+            return Histogram.model_validate({"bins": raw})
+        return Histogram(**raw)
 
     async def get_pace_histogram(
         self,
@@ -407,7 +413,10 @@ class ICUClient:
             Histogram with pace distribution bins
         """
         response = await self._request("GET", f"/activity/{activity_id}/pace-histogram")
-        return Histogram(**response.json())
+        raw: dict[str, Any] | list[dict[str, Any]] = response.json()
+        if isinstance(raw, list):
+            return Histogram.model_validate({"bins": raw})
+        return Histogram(**raw)
 
     async def get_gap_histogram(
         self,
@@ -422,7 +431,10 @@ class ICUClient:
             Histogram with GAP distribution bins
         """
         response = await self._request("GET", f"/activity/{activity_id}/gap-histogram")
-        return Histogram(**response.json())
+        raw: dict[str, Any] | list[dict[str, Any]] = response.json()
+        if isinstance(raw, list):
+            return Histogram.model_validate({"bins": raw})
+        return Histogram(**raw)
 
     # ==================== Wellness Endpoints ====================
 
@@ -588,6 +600,7 @@ class ICUClient:
         athlete_id: str | None = None,
         oldest: str | None = None,
         newest: str | None = None,
+        activity_type: str = "Ride",
     ) -> PowerCurve:
         """Get power curve data (best efforts for various durations).
 
@@ -595,12 +608,13 @@ class ICUClient:
             athlete_id: Athlete ID (uses config default if not provided)
             oldest: Oldest date to include (ISO-8601 format)
             newest: Newest date to include (ISO-8601 format)
+            activity_type: Activity type filter (default "Ride")
 
         Returns:
             PowerCurve with best efforts data
         """
         athlete_id = athlete_id or self.config.intervals_icu_athlete_id
-        params = {}
+        params: dict[str, str] = {"type": activity_type}
 
         if oldest:
             params["oldest"] = oldest
